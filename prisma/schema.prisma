@@ -1,0 +1,240 @@
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Users & Auth ────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  books       UserBook[]
+  collections Collection[]
+  sessions    Session[]
+  preferences UserPreferences?
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("sessions")
+}
+
+model UserPreferences {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // Reader defaults
+  readerTheme      String @default("light") // light, dark, sepia
+  readerFontFamily String @default("serif")
+  readerFontSize   Int    @default(16)
+  readerLineHeight Float  @default(1.6)
+  readerColumns    Int    @default(1)
+
+  // UI preferences
+  libraryView String @default("grid") // grid, list
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// ─── Books ───────────────────────────────────────────────────
+
+enum BookFormat {
+  EPUB
+  PDF
+  MOBI
+  CBZ
+  CBR
+  TXT
+  MARKDOWN
+}
+
+model Book {
+  id          String     @id @default(cuid())
+  title       String
+  author      String     @default("Unknown")
+  description String?    @db.Text
+  isbn        String?
+  publisher   String?
+  publishedAt DateTime?
+  language    String     @default("en")
+  format      BookFormat
+  fileSize    Int // bytes
+  filePath    String // relative path in storage
+  coverPath   String? // relative path to cover image
+  pageCount   Int?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Upload metadata
+  uploadedById String
+  originalName String
+
+  userBooks      UserBook[]
+  tags           BookTag[]
+  collectionItems CollectionItem[]
+
+  @@index([title])
+  @@index([author])
+  @@map("books")
+}
+
+// ─── User-Book relationship (per-user state) ─────────────────
+
+enum ReadingStatus {
+  WANT_TO_READ
+  READING
+  FINISHED
+  DROPPED
+}
+
+model UserBook {
+  id     String @id @default(cuid())
+  userId String
+  bookId String
+
+  status       ReadingStatus @default(WANT_TO_READ)
+  rating       Int? // 1-5
+  isFavorite   Boolean       @default(false)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  // Reading progress
+  progress     Float         @default(0) // 0-100 percentage
+  currentCfi   String?       // EPUB CFI location
+  currentPage  Int?          // PDF/CBZ page number
+  lastReadAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book      Book       @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  bookmarks Bookmark[]
+  highlights Highlight[]
+
+  @@unique([userId, bookId])
+  @@index([userId])
+  @@index([bookId])
+  @@map("user_books")
+}
+
+// ─── Bookmarks ───────────────────────────────────────────────
+
+model Bookmark {
+  id         String @id @default(cuid())
+  userBookId String
+  label      String?
+  cfi        String?  // EPUB CFI
+  page       Int?     // PDF/CBZ page
+  position   Float?   // percentage position
+  createdAt  DateTime @default(now())
+
+  userBook UserBook @relation(fields: [userBookId], references: [id], onDelete: Cascade)
+
+  @@index([userBookId])
+  @@map("bookmarks")
+}
+
+// ─── Highlights & Annotations ────────────────────────────────
+
+model Highlight {
+  id         String  @id @default(cuid())
+  userBookId String
+  text       String  @db.Text
+  note       String? @db.Text
+  color      String  @default("#FFEB3B") // highlight color
+  cfiRange   String? // EPUB CFI range
+  page       Int?    // PDF/CBZ page
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userBook UserBook @relation(fields: [userBookId], references: [id], onDelete: Cascade)
+
+  @@index([userBookId])
+  @@map("highlights")
+}
+
+// ─── Collections (shelves) ───────────────────────────────────
+
+model Collection {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  color       String   @default("#6366F1") // collection accent color
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CollectionItem[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("collections")
+}
+
+model CollectionItem {
+  id           String @id @default(cuid())
+  collectionId String
+  bookId       String
+  sortOrder    Int    @default(0)
+  addedAt      DateTime @default(now())
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  book       Book       @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, bookId])
+  @@map("collection_items")
+}
+
+// ─── Tags ────────────────────────────────────────────────────
+
+model Tag {
+  id    String @id @default(cuid())
+  name  String @unique
+  color String @default("#9CA3AF")
+
+  books BookTag[]
+
+  @@map("tags")
+}
+
+model BookTag {
+  id     String @id @default(cuid())
+  bookId String
+  tagId  String
+
+  book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, tagId])
+  @@map("book_tags")
+}
