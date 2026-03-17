@@ -291,6 +291,10 @@ export function ReaderToolbar({
                 </button>
               </div>
             </fieldset>
+
+            <p className="text-[11px] text-neutral-500">
+              Tip: use arrow keys for page navigation.
+            </p>
           </div>
         </div>
       </div>

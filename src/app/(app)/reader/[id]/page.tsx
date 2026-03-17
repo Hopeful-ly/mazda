@@ -4,11 +4,14 @@ import type { NavItem } from "epubjs";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { ComicViewer } from "@/components/reader/comic-viewer";
 import {
   EpubReader,
   type EpubReaderHandle,
 } from "@/components/reader/epub-reader";
+import { PdfViewer } from "@/components/reader/pdf-viewer";
 import { ReaderToolbar } from "@/components/reader/reader-toolbar";
+import { TextReader } from "@/components/reader/text-reader";
 import { type TocItem, TocPanel } from "@/components/reader/toc-panel";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -129,6 +132,16 @@ export default function ReaderPage() {
     readerRef.current?.goTo(href);
   }
 
+  function handlePagedProgress(nextProgress: number, page: number) {
+    setProgress(nextProgress);
+    setSavePayload({ progress: nextProgress, currentCfi: "" });
+    saveProgress.mutate({
+      bookId: id,
+      progress: nextProgress,
+      currentPage: page,
+    });
+  }
+
   if (isBookLoading || isProgressLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -145,23 +158,6 @@ export default function ReaderPage() {
     );
   }
 
-  if (book.format !== "EPUB") {
-    return (
-      <div className="mx-auto max-w-lg rounded-lg border border-border bg-background p-6">
-        <h1 className="text-lg font-semibold text-foreground">Reader</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Reader for this format is coming soon
-        </p>
-        <Link
-          href={`/books/${id}`}
-          className="mt-4 inline-flex text-sm font-medium text-primary hover:underline"
-        >
-          Back to book
-        </Link>
-      </div>
-    );
-  }
-
   return (
     <div className="fixed inset-0 z-20 bg-background">
       <ReaderToolbar
@@ -173,22 +169,72 @@ export default function ReaderPage() {
         onBack={() => router.push(`/books/${id}`)}
       />
 
-      <TocPanel
-        toc={toc}
-        onNavigate={handleTocNavigate}
-        isOpen={tocOpen}
-        onClose={() => setTocOpen(false)}
-      />
+      {book.format === "EPUB" && (
+        <>
+          <TocPanel
+            toc={toc}
+            onNavigate={handleTocNavigate}
+            isOpen={tocOpen}
+            onClose={() => setTocOpen(false)}
+          />
 
-      <EpubReader
-        ref={readerRef}
-        bookUrl={`/api/books/${id}/content`}
-        initialCfi={currentCfi || undefined}
-        onLocationChange={handleLocationChange}
-        onTextSelected={handleTextSelected}
-        preferences={preferences}
-        onTocLoaded={(items) => setToc(mapTocItems(items))}
-      />
+          <EpubReader
+            ref={readerRef}
+            bookUrl={`/api/books/${id}/content`}
+            initialCfi={currentCfi || undefined}
+            onLocationChange={handleLocationChange}
+            onTextSelected={handleTextSelected}
+            preferences={preferences}
+            onTocLoaded={(items) => setToc(mapTocItems(items))}
+          />
+        </>
+      )}
+
+      {book.format === "PDF" && (
+        <PdfViewer
+          bookUrl={`/api/books/${id}/content`}
+          initialPage={readerProgress?.currentPage ?? 1}
+          onProgress={handlePagedProgress}
+        />
+      )}
+
+      {(book.format === "CBZ" || book.format === "CBR") && (
+        <ComicViewer
+          bookUrl={`/api/books/${id}/content`}
+          initialPage={readerProgress?.currentPage ?? 1}
+          onProgress={handlePagedProgress}
+        />
+      )}
+
+      {(book.format === "TXT" || book.format === "MARKDOWN") && (
+        <TextReader
+          bookUrl={`/api/books/${id}/content`}
+          isMarkdown={book.format === "MARKDOWN"}
+          preferences={preferences}
+          onProgress={(nextProgress) => {
+            setProgress(nextProgress);
+            setSavePayload({ progress: nextProgress, currentCfi: "" });
+          }}
+        />
+      )}
+
+      {book.format === "MOBI" && (
+        <div className="flex h-full items-center justify-center">
+          <div className="mx-auto max-w-lg rounded-lg border border-border bg-background p-6">
+            <h1 className="text-lg font-semibold text-foreground">Reader</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              MOBI rendering is not yet available in-browser. Download to read
+              in a compatible app.
+            </p>
+            <Link
+              href={`/books/${id}`}
+              className="mt-4 inline-flex text-sm font-medium text-primary hover:underline"
+            >
+              Back to book
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-md bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow">
         {saveError
