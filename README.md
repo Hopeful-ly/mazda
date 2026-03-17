@@ -12,6 +12,18 @@ This project was implemented with very heavy AI assistance.
 
 If you fork or deploy Mazda, keep this disclosure so downstream users know how the codebase was produced.
 
+---
+## Non AI section
+Hey, just a quick human note.
+I know the issues with AI code. 
+The reason for this project is that I was using an app for managing books self-hosted, and that app suddently disappeared so I thought why not make one using AI. this is just a day's afternoon quick project that I made because I wanted something quick and nice to read books with.
+
+Note that this is probably full of security issues/etc. You can report them if you find any and I'll personally try to fix them, humanely, but this is just a quick and easy solution for my personal problem and is not meant to be used in production environments.
+
+I wish you a beautiful day :)
+
+---
+
 ## Features
 
 - Multi-user auth with bootstrap admin flow (first account becomes admin)
