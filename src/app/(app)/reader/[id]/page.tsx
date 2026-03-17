@@ -56,11 +56,18 @@ export default function ReaderPage() {
   const [currentCfi, setCurrentCfi] = useState("");
   const [toc, setToc] = useState<TocItem[]>([]);
   const [tocOpen, setTocOpen] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(false);
   const [savePayload, setSavePayload] = useState<{
     progress: number;
     currentCfi: string;
+    currentPage?: number;
   } | null>(null);
   const [saveError, setSaveError] = useState("");
+  const lastSavedRef = useRef<{
+    progress: number;
+    currentCfi: string;
+    currentPage?: number;
+  } | null>(null);
 
   const { data: user } = trpc.auth.me.useQuery();
   const { data: book, isLoading: isBookLoading } = trpc.books.get.useQuery(
@@ -102,11 +109,26 @@ export default function ReaderPage() {
 
   useEffect(() => {
     if (!debouncedSavePayload) return;
+
+    const last = lastSavedRef.current;
+    const sameCfi =
+      (last?.currentCfi ?? "") === debouncedSavePayload.currentCfi;
+    const samePage =
+      (last?.currentPage ?? null) ===
+      (debouncedSavePayload.currentPage ?? null);
+    const closeProgress =
+      last != null &&
+      Math.abs(last.progress - debouncedSavePayload.progress) < 0.2;
+
+    if (sameCfi && samePage && closeProgress) return;
+
     saveProgress.mutate({
       bookId: id,
       progress: debouncedSavePayload.progress,
-      currentCfi: debouncedSavePayload.currentCfi,
+      currentCfi: debouncedSavePayload.currentCfi || undefined,
+      currentPage: debouncedSavePayload.currentPage,
     });
+    lastSavedRef.current = debouncedSavePayload;
   }, [debouncedSavePayload, id, saveProgress]);
 
   function handleLocationChange(nextProgress: number, cfi: string) {
@@ -134,10 +156,9 @@ export default function ReaderPage() {
 
   function handlePagedProgress(nextProgress: number, page: number) {
     setProgress(nextProgress);
-    setSavePayload({ progress: nextProgress, currentCfi: "" });
-    saveProgress.mutate({
-      bookId: id,
+    setSavePayload({
       progress: nextProgress,
+      currentCfi: "",
       currentPage: page,
     });
   }
@@ -167,6 +188,8 @@ export default function ReaderPage() {
         bookTitle={book.title}
         progress={progress}
         onBack={() => router.push(`/books/${id}`)}
+        visible={controlsVisible}
+        onToggleVisibility={() => setControlsVisible((v) => !v)}
       />
 
       {book.format === "EPUB" && (
@@ -186,6 +209,7 @@ export default function ReaderPage() {
             onTextSelected={handleTextSelected}
             preferences={preferences}
             onTocLoaded={(items) => setToc(mapTocItems(items))}
+            onToggleControls={() => setControlsVisible((v) => !v)}
           />
         </>
       )}

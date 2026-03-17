@@ -1,10 +1,12 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const toggleSidebar = useCallback(() => {
@@ -14,6 +16,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
   }, []);
+
+  if (pathname.startsWith("/reader/")) {
+    return <div className="min-h-screen bg-background">{children}</div>;
+  }
 
   return (
     <div className="min-h-screen bg-background">

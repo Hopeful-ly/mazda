@@ -35,7 +35,9 @@ export const booksRouter = router({
         limit = 24,
       } = input ?? {};
 
-      const where: Record<string, unknown> = {};
+      const where: Record<string, unknown> = {
+        userBooks: { some: { userId: ctx.user.id } },
+      };
 
       if (search) {
         where.OR = [
@@ -53,7 +55,16 @@ export const booksRouter = router({
       }
 
       if (collectionId) {
-        where.collectionItems = { some: { collectionId } };
+        where.collectionItems = {
+          some: {
+            collectionId,
+            collection: { userId: ctx.user.id },
+          },
+        };
+      }
+
+      if (status) {
+        where.userBooks = { some: { userId: ctx.user.id, status } };
       }
 
       // Build orderBy
@@ -90,14 +101,8 @@ export const booksRouter = router({
         ctx.prisma.book.count({ where }),
       ]);
 
-      // Filter by status if needed (post-query since it's on userBooks)
-      let filteredBooks = books;
-      if (status) {
-        filteredBooks = books.filter((b) => b.userBooks[0]?.status === status);
-      }
-
       return {
-        books: filteredBooks.map((book) => ({
+        books: books.map((book) => ({
           ...book,
           userBook: book.userBooks[0] ?? null,
           tags: book.tags.map((bt) => bt.tag),
@@ -113,8 +118,11 @@ export const booksRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const book = await ctx.prisma.book.findUnique({
-        where: { id: input.id },
+      const book = await ctx.prisma.book.findFirst({
+        where: {
+          id: input.id,
+          userBooks: { some: { userId: ctx.user.id } },
+        },
         include: {
           userBooks: {
             where: { userId: ctx.user.id },
@@ -159,6 +167,18 @@ export const booksRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+      const ownership = await ctx.prisma.book.findFirst({
+        where: { id, uploadedById: ctx.user.id },
+        select: { id: true },
+      });
+
+      if (!ownership) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have permission to update this book",
+        });
+      }
+
       return ctx.prisma.book.update({
         where: { id },
         data,
@@ -199,6 +219,22 @@ export const booksRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { bookId, ...data } = input;
 
+      const book = await ctx.prisma.book.findUnique({
+        where: { id: bookId },
+        select: { id: true, uploadedById: true },
+      });
+
+      if (!book) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Book not found" });
+      }
+
+      if (book.uploadedById !== ctx.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have permission to update this book",
+        });
+      }
+
       const updateData: Record<string, unknown> = { ...data };
 
       // Auto-set dates based on status changes
@@ -234,6 +270,22 @@ export const booksRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const book = await ctx.prisma.book.findUnique({
+        where: { id: input.bookId },
+        select: { uploadedById: true },
+      });
+
+      if (!book) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Book not found" });
+      }
+
+      if (book.uploadedById !== ctx.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have permission to modify tags for this book",
+        });
+      }
+
       // Delete existing tags
       await ctx.prisma.bookTag.deleteMany({
         where: { bookId: input.bookId },
@@ -285,8 +337,14 @@ export const booksRouter = router({
 
   // Dashboard stats
   stats: protectedProcedure.query(async ({ ctx }) => {
+    const userBookWhere = {
+      userId: ctx.user.id,
+    };
+
     const [totalBooks, reading, finished, totalUserBooks] = await Promise.all([
-      ctx.prisma.book.count(),
+      ctx.prisma.userBook.count({
+        where: userBookWhere,
+      }),
       ctx.prisma.userBook.count({
         where: { userId: ctx.user.id, status: "READING" },
       }),

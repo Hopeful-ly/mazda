@@ -28,6 +28,7 @@ interface EpubReaderProps {
   preferences: ReaderPreferences;
   onTocLoaded?: (toc: NavItem[]) => void;
   onTextSelected?: (cfiRange: string, text: string) => void;
+  onToggleControls?: () => void;
 }
 
 export interface EpubReaderHandle {
@@ -75,13 +76,16 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
       preferences,
       onTocLoaded,
       onTextSelected,
+      onToggleControls,
     },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const bookRef = useRef<Book | null>(null);
     const renditionRef = useRef<Rendition | null>(null);
+    const objectUrlRef = useRef<string | null>(null);
     const [ready, setReady] = useState(false);
+    const [loadError, setLoadError] = useState("");
 
     // Store callbacks in refs so the init effect doesn't depend on them
     const onLocationChangeRef = useRef(onLocationChange);
@@ -118,74 +122,120 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
         const mountElement = containerRef.current;
         if (!mountElement) return;
 
-        const ePub = (await import("epubjs")).default;
-        if (cancelled) return;
+        try {
+          setLoadError("");
+          const ePub = (await import("epubjs")).default;
+          if (cancelled) return;
 
-        const book = ePub(bookUrl);
-        bookRef.current = book;
-
-        const { width, height } = mountElement.getBoundingClientRect();
-        const prefs = preferencesRef.current;
-        const themeStyles = getThemeStyles(prefs);
-
-        const rendition = book.renderTo(mountElement, {
-          width,
-          height,
-          spread: prefs.columns === 2 ? "auto" : "none",
-          flow: "paginated",
-        });
-
-        renditionRef.current = rendition;
-
-        // Apply theme
-        rendition.themes.default(themeStyles.css);
-
-        // Navigate to initial position or start
-        const cfi = initialCfiRef.current;
-        if (cfi) {
-          await rendition.display(cfi);
-        } else {
-          await rendition.display();
-        }
-
-        if (cancelled) {
-          book.destroy();
-          return;
-        }
-
-        // Resolve TOC
-        const navigation = await book.loaded.navigation;
-        if (!cancelled) {
-          onTocLoadedRef.current?.(navigation.toc);
-        }
-
-        // Generate locations for progress tracking
-        await book.ready;
-        if (!cancelled) {
-          await book.locations.generate(1024);
-        }
-
-        // Track location changes
-        rendition.on(
-          "relocated",
-          (location: { start: { cfi: string; percentage: number } }) => {
-            if (!cancelled) {
-              const percent = (location.start.percentage ?? 0) * 100;
-              onLocationChangeRef.current(percent, location.start.cfi);
-            }
-          },
-        );
-
-        // Handle text selection
-        rendition.on("selected", (cfiRange: string, _contents: Contents) => {
-          if (!cancelled) {
-            const range = rendition.getRange(cfiRange);
-            const text = range?.toString() ?? "";
-            onTextSelectedRef.current?.(cfiRange, text);
+          const response = await fetch(bookUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to load EPUB (${response.status})`);
           }
-        });
 
-        if (!cancelled) setReady(true);
+          const arrayBuffer = await response.arrayBuffer();
+          const blob = new Blob([arrayBuffer], {
+            type: "application/epub+zip",
+          });
+          const objectUrl = URL.createObjectURL(blob);
+          objectUrlRef.current = objectUrl;
+
+          const book = ePub();
+          await book.open(arrayBuffer, "binary");
+          bookRef.current = book;
+
+          const { width, height } = mountElement.getBoundingClientRect();
+          const prefs = preferencesRef.current;
+          const themeStyles = getThemeStyles(prefs);
+
+          const rendition = book.renderTo(mountElement, {
+            width,
+            height,
+            spread: prefs.columns === 2 ? "auto" : "none",
+            flow: "paginated",
+          });
+
+          renditionRef.current = rendition;
+
+          rendition.hooks.content.register(
+            (contents: { document?: Document }) => {
+              const doc = contents.document;
+              if (!doc) return;
+
+              if (!doc.head && doc.documentElement) {
+                const head = doc.createElement("head");
+                doc.documentElement.insertBefore(
+                  head,
+                  doc.documentElement.firstChild,
+                );
+              }
+
+              for (const link of doc.querySelectorAll(
+                'link[rel="stylesheet"]',
+              )) {
+                const typed = link as HTMLLinkElement;
+                if (!typed.type) {
+                  typed.type = "text/css";
+                }
+              }
+            },
+          );
+
+          rendition.themes.default(themeStyles.css);
+
+          const cfi = initialCfiRef.current;
+          if (cfi) {
+            await rendition.display(cfi);
+          } else {
+            await rendition.display();
+          }
+
+          if (cancelled) {
+            book.destroy();
+            return;
+          }
+
+          const navigation = await book.loaded.navigation;
+          if (!cancelled) {
+            onTocLoadedRef.current?.(navigation.toc);
+          }
+
+          await book.ready;
+          if (!cancelled) {
+            await book.locations.generate(1024);
+          }
+
+          rendition.on(
+            "relocated",
+            (location: { start: { cfi: string; percentage: number } }) => {
+              if (!cancelled) {
+                const percent = (location.start.percentage ?? 0) * 100;
+                onLocationChangeRef.current(percent, location.start.cfi);
+              }
+            },
+          );
+
+          rendition.on("selected", (cfiRange: string, _contents: Contents) => {
+            if (!cancelled) {
+              const range = rendition.getRange(cfiRange);
+              const text = range?.toString() ?? "";
+              onTextSelectedRef.current?.(cfiRange, text);
+            }
+          });
+
+          rendition.on("displayError", () => {
+            if (!cancelled) {
+              setLoadError("Some sections in this EPUB could not be rendered.");
+            }
+          });
+
+          if (!cancelled) setReady(true);
+        } catch (error) {
+          if (!cancelled) {
+            setLoadError(
+              error instanceof Error ? error.message : "Failed to load EPUB",
+            );
+          }
+        }
       }
 
       init();
@@ -196,6 +246,10 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
         if (bookRef.current) {
           bookRef.current.destroy();
           bookRef.current = null;
+        }
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
         }
         setReady(false);
       };
@@ -260,12 +314,59 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
     }, [ready]);
 
     const handlePrev = useCallback(() => {
+      if (!ready) return;
       renditionRef.current?.prev();
-    }, []);
+    }, [ready]);
 
     const handleNext = useCallback(() => {
+      if (!ready) return;
       renditionRef.current?.next();
-    }, []);
+    }, [ready]);
+
+    const dragStartXRef = useRef<number | null>(null);
+
+    const handlePointerDown = useCallback(
+      (e: React.PointerEvent<HTMLDivElement>) => {
+        dragStartXRef.current = e.clientX;
+      },
+      [],
+    );
+
+    const handlePointerUp = useCallback(
+      (e: React.PointerEvent<HTMLDivElement>) => {
+        const startX = dragStartXRef.current;
+        dragStartXRef.current = null;
+        if (startX == null) return;
+
+        const dx = e.clientX - startX;
+        if (Math.abs(dx) > 50) {
+          if (dx < 0) {
+            handleNext();
+          } else {
+            handlePrev();
+          }
+          return;
+        }
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const xRatio = (e.clientX - rect.left) / rect.width;
+        const yRatio = (e.clientY - rect.top) / rect.height;
+        const inCenterZone =
+          xRatio > 0.33 && xRatio < 0.67 && yRatio > 0.28 && yRatio < 0.72;
+
+        if (inCenterZone) {
+          onToggleControls?.();
+          return;
+        }
+
+        if (xRatio < 0.5) {
+          handlePrev();
+        } else {
+          handleNext();
+        }
+      },
+      [handleNext, handlePrev, onToggleControls],
+    );
 
     const theme = READER_THEMES.find((t) => t.value === preferences.theme);
     const bg = theme?.bg ?? "#FFFFFF";
@@ -275,6 +376,8 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
       <div
         className="relative w-full h-full select-none"
         style={{ background: bg, color: text }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
       >
         {/* EPUB container */}
         <div ref={containerRef} className="w-full h-full" />
@@ -304,7 +407,13 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
         {/* Loading state */}
         {!ready && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-current border-t-transparent" />
+            {loadError ? (
+              <div className="rounded bg-black/60 px-3 py-2 text-sm text-red-300">
+                {loadError}
+              </div>
+            ) : (
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-current border-t-transparent" />
+            )}
           </div>
         )}
       </div>

@@ -27,8 +27,14 @@ export const authRouter = router({
       const userCount = await ctx.prisma.user.count();
       const isFirstUser = userCount === 0;
 
-      // If not first user, registration might be restricted
-      // For now, allow open registration
+      if (!isFirstUser) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Registration is disabled. Ask an admin to create your account.",
+        });
+      }
+
       const existingEmail = await ctx.prisma.user.findUnique({
         where: { email: input.email },
       });

@@ -66,7 +66,7 @@ export async function POST(req: Request) {
     let isbn: string | undefined;
     let publisher: string | undefined;
     let language = "en";
-    let coverBuffer: Buffer | undefined;
+    let extractedCoverBuffer: Buffer | undefined;
 
     if (format === "EPUB") {
       const epubMeta = await extractEpubMetadata(buffer);
@@ -76,7 +76,29 @@ export async function POST(req: Request) {
       if (epubMeta.isbn) isbn = epubMeta.isbn;
       if (epubMeta.publisher) publisher = epubMeta.publisher;
       if (epubMeta.language) language = epubMeta.language;
-      if (epubMeta.coverImage) coverBuffer = epubMeta.coverImage;
+      if (epubMeta.coverImage) extractedCoverBuffer = epubMeta.coverImage;
+    }
+
+    // Prefer registry metadata/cover first, then fall back to extracted cover
+    let metadata = isbn ? await fetchMetadataByISBN(isbn) : null;
+    if (!metadata) {
+      metadata = await fetchMetadataByTitle(
+        title,
+        author !== "Unknown" ? author : undefined,
+      );
+    }
+
+    if (metadata?.description) description = metadata.description;
+    if (metadata?.publisher) publisher = metadata.publisher;
+    if (metadata?.language) language = metadata.language;
+    if (metadata?.isbn && !isbn) isbn = metadata.isbn;
+
+    let registryCoverBuffer: Buffer | undefined;
+    if (metadata?.coverUrl) {
+      const downloaded = await downloadCover(metadata.coverUrl);
+      if (downloaded) {
+        registryCoverBuffer = downloaded;
+      }
     }
 
     // Create book record
@@ -88,6 +110,7 @@ export async function POST(req: Request) {
         isbn,
         publisher,
         language,
+        pageCount: metadata?.pageCount,
         format: format as BookFormat,
         fileSize: file.size,
         filePath,
@@ -96,19 +119,15 @@ export async function POST(req: Request) {
       },
     });
 
-    // Save cover if extracted
-    if (coverBuffer) {
-      const coverPath = await saveCover(coverBuffer, book.id);
+    // Save cover (registry first, extraction fallback)
+    const selectedCoverBuffer = registryCoverBuffer ?? extractedCoverBuffer;
+    if (selectedCoverBuffer) {
+      const coverPath = await saveCover(selectedCoverBuffer, book.id);
       await prisma.book.update({
         where: { id: book.id },
         data: { coverPath },
       });
     }
-
-    // Try to fetch additional metadata from Open Library (non-blocking)
-    fetchAndUpdateMetadata(book.id, title, author, isbn).catch(() => {
-      // Silently fail - metadata enrichment is best-effort
-    });
 
     // Create UserBook relationship
     await prisma.userBook.create({
@@ -119,6 +138,23 @@ export async function POST(req: Request) {
       },
     });
 
+    // Give admin users visibility to all uploaded books
+    const admins = await prisma.user.findMany({
+      where: { role: "ADMIN", id: { not: user.id } },
+      select: { id: true },
+    });
+
+    if (admins.length > 0) {
+      await prisma.userBook.createMany({
+        data: admins.map((admin) => ({
+          userId: admin.id,
+          bookId: book.id,
+          status: "WANT_TO_READ",
+        })),
+        skipDuplicates: true,
+      });
+    }
+
     return NextResponse.json({ book });
   } catch (error) {
     console.error("Upload error:", error);
@@ -126,55 +162,5 @@ export async function POST(req: Request) {
       { error: "Failed to upload book" },
       { status: 500 },
     );
-  }
-}
-
-async function fetchAndUpdateMetadata(
-  bookId: string,
-  title: string,
-  author: string,
-  isbn?: string,
-) {
-  let metadata = isbn ? await fetchMetadataByISBN(isbn) : null;
-
-  if (!metadata) {
-    metadata = await fetchMetadataByTitle(
-      title,
-      author !== "Unknown" ? author : undefined,
-    );
-  }
-
-  if (!metadata) return;
-
-  const updateData: Record<string, unknown> = {};
-  if (metadata.description) updateData.description = metadata.description;
-  if (metadata.publisher) updateData.publisher = metadata.publisher;
-  if (metadata.pageCount) updateData.pageCount = metadata.pageCount;
-  if (metadata.isbn && !isbn) updateData.isbn = metadata.isbn;
-
-  if (Object.keys(updateData).length > 0) {
-    await prisma.book.update({
-      where: { id: bookId },
-      data: updateData,
-    });
-  }
-
-  // Download and save cover if we don't have one
-  if (metadata.coverUrl) {
-    const book = await prisma.book.findUnique({
-      where: { id: bookId },
-      select: { coverPath: true },
-    });
-
-    if (!book?.coverPath) {
-      const coverBuf = await downloadCover(metadata.coverUrl);
-      if (coverBuf) {
-        const coverPath = await saveCover(coverBuf, bookId);
-        await prisma.book.update({
-          where: { id: bookId },
-          data: { coverPath },
-        });
-      }
-    }
   }
 }

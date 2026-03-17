@@ -146,6 +146,22 @@ export const collectionsRouter = router({
         });
       }
 
+      const book = await ctx.prisma.book.findUnique({
+        where: { id: input.bookId },
+        select: { uploadedById: true },
+      });
+
+      if (!book) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Book not found" });
+      }
+
+      if (book.uploadedById !== ctx.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have permission to add this book",
+        });
+      }
+
       const maxOrder = await ctx.prisma.collectionItem.aggregate({
         where: { collectionId: input.collectionId },
         _max: { sortOrder: true },
@@ -169,6 +185,18 @@ export const collectionsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const collection = await ctx.prisma.collection.findUnique({
+        where: { id: input.collectionId },
+        select: { userId: true },
+      });
+
+      if (!collection || collection.userId !== ctx.user.id) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Collection not found",
+        });
+      }
+
       await ctx.prisma.collectionItem.delete({
         where: {
           collectionId_bookId: {

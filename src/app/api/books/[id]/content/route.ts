@@ -25,9 +25,21 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const book = await prisma.book.findUnique({ where: { id } });
+  const book = await prisma.book.findUnique({
+    where: { id },
+    include: {
+      userBooks: {
+        where: { userId: user.id },
+        select: { id: true },
+      },
+    },
+  });
   if (!book) {
     return NextResponse.json({ error: "Book not found" }, { status: 404 });
+  }
+
+  if (book.userBooks.length === 0) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {

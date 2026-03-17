@@ -19,6 +19,8 @@ interface ReaderToolbarProps {
   bookTitle: string;
   progress: number;
   onBack: () => void;
+  visible?: boolean;
+  onToggleVisibility?: () => void;
 }
 
 export function ReaderToolbar({
@@ -28,41 +30,44 @@ export function ReaderToolbar({
   bookTitle,
   progress,
   onBack,
+  visible,
+  onToggleVisibility,
 }: ReaderToolbarProps) {
-  const [visible, setVisible] = useState(false);
+  const [internalVisible, setInternalVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isVisible = visible ?? internalVisible;
 
   const resetHideTimer = useCallback(() => {
     if (hideTimerRef.current) {
       clearTimeout(hideTimerRef.current);
     }
     hideTimerRef.current = setTimeout(() => {
-      setVisible(false);
+      setInternalVisible(false);
       setSettingsOpen(false);
     }, 3000);
   }, []);
 
   const show = useCallback(() => {
-    setVisible(true);
+    setInternalVisible(true);
     resetHideTimer();
   }, [resetHideTimer]);
 
   // Expose toggle via center-tap zone
   const handleCenterTap = useCallback(() => {
-    if (visible) {
-      setVisible(false);
+    if (isVisible) {
+      setInternalVisible(false);
       setSettingsOpen(false);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     } else {
       show();
     }
-  }, [visible, show]);
+  }, [isVisible, show]);
 
   // Reset timer on any interaction within the toolbar
   const handleInteraction = useCallback(() => {
-    if (visible) resetHideTimer();
-  }, [visible, resetHideTimer]);
+    if (isVisible) resetHideTimer();
+  }, [isVisible, resetHideTimer]);
 
   useEffect(() => {
     return () => {
@@ -79,20 +84,23 @@ export function ReaderToolbar({
 
   return (
     <>
-      {/* Center tap zone -- invisible, always present */}
-      <button
-        type="button"
-        aria-label="Toggle toolbar"
-        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-30"
-        onClick={handleCenterTap}
-      />
+      {onToggleVisibility ? null : (
+        <button
+          type="button"
+          aria-label="Toggle toolbar"
+          className="fixed bottom-4 right-4 z-40 rounded-full bg-neutral-900/80 px-3 py-2 text-xs text-neutral-100 shadow hover:bg-neutral-800"
+          onClick={handleCenterTap}
+        >
+          Menu
+        </button>
+      )}
 
       {/* Top bar */}
       <div
         role="toolbar"
         aria-label="Reader toolbar"
         className={`fixed top-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out
-          ${visible ? "translate-y-0" : "-translate-y-full"}`}
+          ${isVisible ? "translate-y-0" : "-translate-y-full"}`}
         onPointerMove={handleInteraction}
         onClick={handleInteraction}
         onKeyDown={handleInteraction}
