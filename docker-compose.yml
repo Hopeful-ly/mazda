@@ -2,13 +2,17 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: mazda
-      POSTGRES_PASSWORD: mazda
-      POSTGRES_DB: mazda
+      POSTGRES_USER: ${POSTGRES_USER:-mazda}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mazda}
+      POSTGRES_DB: ${POSTGRES_DB:-mazda}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mazda -d mazda"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-mazda} -d ${POSTGRES_DB:-mazda}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -19,8 +23,8 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://mazda:mazda@db:5432/mazda?schema=public
-      JWT_SECRET: change-me-in-production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mazda}:${POSTGRES_PASSWORD:-mazda}@db:5432/${POSTGRES_DB:-mazda}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       BOOKS_STORAGE_PATH: /app/data/books
       COVERS_STORAGE_PATH: /app/data/covers
       NEXT_PUBLIC_APP_URL: http://localhost:3000
