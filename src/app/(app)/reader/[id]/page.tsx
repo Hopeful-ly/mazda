@@ -260,13 +260,11 @@ export default function ReaderPage() {
         </div>
       )}
 
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-md bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow">
-        {saveError
-          ? `Save failed: ${saveError}`
-          : saveProgress.isPending
-            ? "Saving progress..."
-            : "Progress saved"}
-      </div>
+      {saveError && (
+        <div className="pointer-events-none fixed bottom-16 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-900/90 px-3 py-1.5 text-xs text-red-200 shadow">
+          Save failed: {saveError}
+        </div>
+      )}
     </div>
   );
 }

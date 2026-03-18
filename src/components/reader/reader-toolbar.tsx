@@ -1,7 +1,16 @@
 "use client";
 
-import { ArrowLeft, Columns2, List, Minus, Plus, Settings } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  Columns2,
+  List,
+  Menu,
+  Minus,
+  Plus,
+  Settings,
+  X,
+} from "lucide-react";
+import { useCallback, useState } from "react";
 import { READER_FONTS, READER_THEMES } from "@/lib/constants";
 
 interface ReaderPreferences {
@@ -35,45 +44,19 @@ export function ReaderToolbar({
 }: ReaderToolbarProps) {
   const [internalVisible, setInternalVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const isVisible = visible ?? internalVisible;
 
-  const resetHideTimer = useCallback(() => {
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-    }
-    hideTimerRef.current = setTimeout(() => {
-      setInternalVisible(false);
-      setSettingsOpen(false);
-    }, 3000);
-  }, []);
-
-  const show = useCallback(() => {
-    setInternalVisible(true);
-    resetHideTimer();
-  }, [resetHideTimer]);
-
-  // Expose toggle via center-tap zone
-  const handleCenterTap = useCallback(() => {
-    if (isVisible) {
-      setInternalVisible(false);
-      setSettingsOpen(false);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  const handleToggle = useCallback(() => {
+    if (onToggleVisibility) {
+      onToggleVisibility();
     } else {
-      show();
+      setInternalVisible((v) => !v);
     }
-  }, [isVisible, show]);
-
-  // Reset timer on any interaction within the toolbar
-  const handleInteraction = useCallback(() => {
-    if (isVisible) resetHideTimer();
-  }, [isVisible, resetHideTimer]);
-
-  useEffect(() => {
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, []);
+    if (isVisible) {
+      setSettingsOpen(false);
+    }
+  }, [onToggleVisibility, isVisible]);
 
   const update = useCallback(
     (patch: Partial<ReaderPreferences>) => {
@@ -84,16 +67,18 @@ export function ReaderToolbar({
 
   return (
     <>
-      {onToggleVisibility ? null : (
-        <button
-          type="button"
-          aria-label="Toggle toolbar"
-          className="fixed bottom-4 right-4 z-40 rounded-full bg-neutral-900/80 px-3 py-2 text-xs text-neutral-100 shadow hover:bg-neutral-800"
-          onClick={handleCenterTap}
-        >
-          Menu
-        </button>
-      )}
+      {/* Floating trigger button — always visible when toolbar is hidden */}
+      <button
+        type="button"
+        aria-label="Open menu"
+        className={`fixed bottom-6 right-6 z-40 h-11 w-11 rounded-full
+          bg-neutral-900/60 backdrop-blur-sm flex items-center justify-center
+          text-neutral-100 shadow-lg active:scale-95 transition-all duration-200
+          ${isVisible ? "opacity-0 pointer-events-none scale-75" : "opacity-100 scale-100"}`}
+        onClick={handleToggle}
+      >
+        <Menu size={20} />
+      </button>
 
       {/* Top bar */}
       <div
@@ -101,9 +86,6 @@ export function ReaderToolbar({
         aria-label="Reader toolbar"
         className={`fixed top-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out
           ${isVisible ? "translate-y-0" : "-translate-y-full"}`}
-        onPointerMove={handleInteraction}
-        onClick={handleInteraction}
-        onKeyDown={handleInteraction}
       >
         <div className="flex items-center gap-2 px-3 py-2 bg-neutral-900/95 backdrop-blur text-neutral-100 shadow-lg">
           <button
@@ -139,6 +121,15 @@ export function ReaderToolbar({
             aria-label="Settings"
           >
             <Settings size={20} />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleToggle}
+            className="p-2 rounded-md hover:bg-white/10 transition-colors shrink-0"
+            aria-label="Close toolbar"
+          >
+            <X size={20} />
           </button>
         </div>
 
@@ -301,8 +292,29 @@ export function ReaderToolbar({
             </fieldset>
 
             <p className="text-[11px] text-neutral-500">
-              Tip: use arrow keys for page navigation.
+              Tip: use arrow keys for page navigation, tap center to
+              toggle this toolbar.
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom progress bar */}
+      <div
+        className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out
+          ${isVisible ? "translate-y-0" : "translate-y-full"}`}
+      >
+        <div className="bg-neutral-900/95 backdrop-blur px-4 py-3 shadow-lg">
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-neutral-400 tabular-nums shrink-0">
+              {Math.round(progress)}%
+            </span>
+            <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-400/70 rounded-full transition-all duration-300"
+                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+              />
+            </div>
           </div>
         </div>
       </div>

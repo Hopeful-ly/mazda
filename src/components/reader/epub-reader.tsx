@@ -1,6 +1,6 @@
 "use client";
 
-import type { Contents, NavItem, Rendition } from "epubjs";
+import type { NavItem, Rendition } from "epubjs";
 import type Book from "epubjs/types/book";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -36,6 +36,17 @@ export interface EpubReaderHandle {
   prevPage: () => void;
   goTo: (cfi: string) => void;
 }
+
+/** Minimum ms between navigation actions to prevent double-skip */
+const NAV_THROTTLE_MS = 300;
+/** Minimum horizontal px to count as a swipe */
+const SWIPE_THRESHOLD = 50;
+/** Max ms for a gesture to count as a swipe */
+const SWIPE_MAX_TIME = 500;
+/** Max px movement for a gesture to count as a tap */
+const TAP_MAX_MOVE = 10;
+/** Max ms for a gesture to count as a tap */
+const TAP_MAX_TIME = 300;
 
 function getThemeStyles(preferences: ReaderPreferences) {
   const theme = READER_THEMES.find((t) => t.value === preferences.theme);
@@ -87,6 +98,9 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
     const [ready, setReady] = useState(false);
     const [loadError, setLoadError] = useState("");
 
+    // Navigation throttle to prevent double page skips
+    const lastNavTimeRef = useRef(0);
+
     // Store callbacks in refs so the init effect doesn't depend on them
     const onLocationChangeRef = useRef(onLocationChange);
     onLocationChangeRef.current = onLocationChange;
@@ -94,6 +108,8 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
     onTocLoadedRef.current = onTocLoaded;
     const onTextSelectedRef = useRef(onTextSelected);
     onTextSelectedRef.current = onTextSelected;
+    const onToggleControlsRef = useRef(onToggleControls);
+    onToggleControlsRef.current = onToggleControls;
 
     // Store initial values in refs (only used at init time)
     const initialCfiRef = useRef(initialCfi);
@@ -101,14 +117,31 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
     const preferencesRef = useRef(preferences);
     preferencesRef.current = preferences;
 
+    // Throttled navigation helpers
+    const navigateNext = useCallback(() => {
+      const now = Date.now();
+      if (now - lastNavTimeRef.current < NAV_THROTTLE_MS) return;
+      lastNavTimeRef.current = now;
+      renditionRef.current?.next();
+    }, []);
+
+    const navigatePrev = useCallback(() => {
+      const now = Date.now();
+      if (now - lastNavTimeRef.current < NAV_THROTTLE_MS) return;
+      lastNavTimeRef.current = now;
+      renditionRef.current?.prev();
+    }, []);
+
+    // Refs for iframe event handlers (stable across renders)
+    const navigateNextRef = useRef(navigateNext);
+    navigateNextRef.current = navigateNext;
+    const navigatePrevRef = useRef(navigatePrev);
+    navigatePrevRef.current = navigatePrev;
+
     // Expose navigation methods
     useImperativeHandle(ref, () => ({
-      nextPage() {
-        renditionRef.current?.next();
-      },
-      prevPage() {
-        renditionRef.current?.prev();
-      },
+      nextPage: navigateNext,
+      prevPage: navigatePrev,
       goTo(cfi: string) {
         renditionRef.current?.display(cfi);
       },
@@ -156,11 +189,13 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
 
           renditionRef.current = rendition;
 
+          // Content hook: fix stylesheets + inject touch/click handlers
           rendition.hooks.content.register(
             (contents: { document?: Document }) => {
               const doc = contents.document;
               if (!doc) return;
 
+              // Fix missing <head> element
               if (!doc.head && doc.documentElement) {
                 const head = doc.createElement("head");
                 doc.documentElement.insertBefore(
@@ -169,6 +204,7 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
                 );
               }
 
+              // Fix stylesheet MIME types
               for (const link of doc.querySelectorAll(
                 'link[rel="stylesheet"]',
               )) {
@@ -177,6 +213,126 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
                   typed.type = "text/css";
                 }
               }
+
+              // --- Touch gesture handling inside the epub iframe ---
+              let touchStartX = 0;
+              let touchStartY = 0;
+              let touchStartTime = 0;
+
+              doc.addEventListener(
+                "touchstart",
+                (e: TouchEvent) => {
+                  if (e.touches.length !== 1) return;
+                  touchStartX = e.touches[0].clientX;
+                  touchStartY = e.touches[0].clientY;
+                  touchStartTime = Date.now();
+                },
+                { passive: true },
+              );
+
+              doc.addEventListener(
+                "touchend",
+                (e: TouchEvent) => {
+                  if (e.changedTouches.length !== 1) return;
+
+                  // Don't navigate during text selection
+                  const sel = doc.getSelection();
+                  if (sel && sel.toString().trim()) return;
+
+                  // Don't interfere with link taps
+                  const target = e.target as Element;
+                  if (target?.closest?.("a[href]")) return;
+
+                  const touch = e.changedTouches[0];
+                  const dx = touch.clientX - touchStartX;
+                  const dy = touch.clientY - touchStartY;
+                  const dt = Date.now() - touchStartTime;
+                  const absDx = Math.abs(dx);
+                  const absDy = Math.abs(dy);
+
+                  // Horizontal swipe: primarily horizontal, >threshold, fast enough
+                  if (
+                    absDx > SWIPE_THRESHOLD &&
+                    absDx > absDy * 1.5 &&
+                    dt < SWIPE_MAX_TIME
+                  ) {
+                    e.preventDefault();
+                    if (dx < 0) navigateNextRef.current();
+                    else navigatePrevRef.current();
+                    return;
+                  }
+
+                  // Tap: small movement, short duration
+                  if (
+                    absDx < TAP_MAX_MOVE &&
+                    absDy < TAP_MAX_MOVE &&
+                    dt < TAP_MAX_TIME
+                  ) {
+                    const docEl = doc.documentElement;
+                    const w =
+                      docEl?.clientWidth ?? window.innerWidth;
+                    const h =
+                      docEl?.clientHeight ?? window.innerHeight;
+                    const xRatio = touch.clientX / w;
+                    const yRatio = touch.clientY / h;
+
+                    // Center zone → toggle controls
+                    if (
+                      xRatio > 0.25 &&
+                      xRatio < 0.75 &&
+                      yRatio > 0.2 &&
+                      yRatio < 0.8
+                    ) {
+                      onToggleControlsRef.current?.();
+                      return;
+                    }
+
+                    // Side zones → navigate
+                    if (xRatio < 0.3) {
+                      navigatePrevRef.current();
+                    } else if (xRatio > 0.7) {
+                      navigateNextRef.current();
+                    }
+                  }
+                },
+                { passive: false },
+              );
+
+              // Desktop: handle clicks inside the iframe
+              doc.addEventListener("click", (e: MouseEvent) => {
+                // Don't interfere with link clicks
+                const target = e.target as Element;
+                if (target?.closest?.("a[href]")) return;
+
+                // Don't navigate during text selection
+                const sel = doc.getSelection();
+                if (sel && sel.toString().trim()) return;
+
+                const docEl = doc.documentElement;
+                const w = docEl?.clientWidth ?? window.innerWidth;
+                const h =
+                  docEl?.clientHeight ?? window.innerHeight;
+                const xRatio = e.clientX / w;
+                const yRatio = e.clientY / h;
+
+                // Center zone → toggle controls
+                if (
+                  xRatio > 0.25 &&
+                  xRatio < 0.75 &&
+                  yRatio > 0.2 &&
+                  yRatio < 0.8
+                ) {
+                  onToggleControlsRef.current?.();
+                  return;
+                }
+
+                // Side zones → navigate
+                if (xRatio < 0.3) {
+                  navigatePrevRef.current();
+                } else if (xRatio > 0.7) {
+                  navigateNextRef.current();
+                }
+              });
             },
           );
 
@@ -214,17 +370,25 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
             },
           );
 
-          rendition.on("selected", (cfiRange: string, _contents: Contents) => {
-            if (!cancelled) {
-              const range = rendition.getRange(cfiRange);
-              const text = range?.toString() ?? "";
-              onTextSelectedRef.current?.(cfiRange, text);
-            }
-          });
+          rendition.on(
+            "selected",
+            (
+              cfiRange: string,
+              _contents: { document?: Document },
+            ) => {
+              if (!cancelled) {
+                const range = rendition.getRange(cfiRange);
+                const text = range?.toString() ?? "";
+                onTextSelectedRef.current?.(cfiRange, text);
+              }
+            },
+          );
 
           rendition.on("displayError", () => {
             if (!cancelled) {
-              setLoadError("Some sections in this EPUB could not be rendered.");
+              setLoadError(
+                "Some sections in this EPUB could not be rendered.",
+              );
             }
           });
 
@@ -232,7 +396,9 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
         } catch (error) {
           if (!cancelled) {
             setLoadError(
-              error instanceof Error ? error.message : "Failed to load EPUB",
+              error instanceof Error
+                ? error.message
+                : "Failed to load EPUB",
             );
           }
         }
@@ -303,70 +469,15 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
 
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-          renditionRef.current?.next();
+          navigateNext();
         } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-          renditionRef.current?.prev();
+          navigatePrev();
         }
       };
 
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [ready]);
-
-    const handlePrev = useCallback(() => {
-      if (!ready) return;
-      renditionRef.current?.prev();
-    }, [ready]);
-
-    const handleNext = useCallback(() => {
-      if (!ready) return;
-      renditionRef.current?.next();
-    }, [ready]);
-
-    const dragStartXRef = useRef<number | null>(null);
-
-    const handlePointerDown = useCallback(
-      (e: React.PointerEvent<HTMLDivElement>) => {
-        dragStartXRef.current = e.clientX;
-      },
-      [],
-    );
-
-    const handlePointerUp = useCallback(
-      (e: React.PointerEvent<HTMLDivElement>) => {
-        const startX = dragStartXRef.current;
-        dragStartXRef.current = null;
-        if (startX == null) return;
-
-        const dx = e.clientX - startX;
-        if (Math.abs(dx) > 50) {
-          if (dx < 0) {
-            handleNext();
-          } else {
-            handlePrev();
-          }
-          return;
-        }
-
-        const rect = e.currentTarget.getBoundingClientRect();
-        const xRatio = (e.clientX - rect.left) / rect.width;
-        const yRatio = (e.clientY - rect.top) / rect.height;
-        const inCenterZone =
-          xRatio > 0.33 && xRatio < 0.67 && yRatio > 0.28 && yRatio < 0.72;
-
-        if (inCenterZone) {
-          onToggleControls?.();
-          return;
-        }
-
-        if (xRatio < 0.5) {
-          handlePrev();
-        } else {
-          handleNext();
-        }
-      },
-      [handleNext, handlePrev, onToggleControls],
-    );
+    }, [ready, navigateNext, navigatePrev]);
 
     const theme = READER_THEMES.find((t) => t.value === preferences.theme);
     const bg = theme?.bg ?? "#FFFFFF";
@@ -376,18 +487,19 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
       <div
         className="relative w-full h-full select-none"
         style={{ background: bg, color: text }}
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
       >
         {/* EPUB container */}
         <div ref={containerRef} className="w-full h-full" />
 
-        {/* Navigation arrows */}
+        {/* Desktop-only hover navigation arrows */}
         <button
           type="button"
-          onClick={handlePrev}
-          className="absolute left-0 top-0 h-full w-12 flex items-center justify-center
-            opacity-0 hover:opacity-100 transition-opacity z-10"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigatePrev();
+          }}
+          className="absolute left-0 top-0 h-full w-12 items-center justify-center
+            opacity-0 hover:opacity-100 transition-opacity z-10 hidden md:flex"
           style={{ color: text }}
           aria-label="Previous page"
         >
@@ -395,9 +507,12 @@ export const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(
         </button>
         <button
           type="button"
-          onClick={handleNext}
-          className="absolute right-0 top-0 h-full w-12 flex items-center justify-center
-            opacity-0 hover:opacity-100 transition-opacity z-10"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigateNext();
+          }}
+          className="absolute right-0 top-0 h-full w-12 items-center justify-center
+            opacity-0 hover:opacity-100 transition-opacity z-10 hidden md:flex"
           style={{ color: text }}
           aria-label="Next page"
         >
