@@ -25,14 +25,14 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-mazda}:${POSTGRES_PASSWORD:-mazda}@db:5432/${POSTGRES_DB:-mazda}?schema=public
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      BOOKS_STORAGE_PATH: /app/data/books
-      COVERS_STORAGE_PATH: /app/data/covers
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      BOOKS_STORAGE_PATH: ${BOOKS_STORAGE_PATH:-/app/data/books}
+      COVERS_STORAGE_PATH: ${COVERS_STORAGE_PATH:-/app/data/covers}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
     volumes:
-      - ./data/books:/app/data/books
-      - ./data/covers:/app/data/covers
+      - ${BOOKS_HOST_PATH:-./data/books}:/app/data/books
+      - ${COVERS_HOST_PATH:-./data/covers}:/app/data/covers
     command: sh -c "bunx prisma migrate deploy && bun run start"
 
 volumes:
