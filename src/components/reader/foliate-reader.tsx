@@ -268,9 +268,9 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
       const handleDraw = async (e: CustomEvent) => {
         const { draw, annotation } = e.detail;
         // Dynamic import overlayer for draw functions
-        // @ts-expect-error — runtime import from public/, no TS module
-        const { Overlayer } = await import(
-          /* webpackIgnore: true */ "/foliate-js/overlayer.js"
+        const { Overlayer } = await import( // eslint-disable-line
+          /* webpackIgnore: true */ // @ts-ignore runtime import from public/
+          "/foliate-js/overlayer.js"
         );
         draw(Overlayer.highlight, { color: annotation.color || "yellow" });
       };
