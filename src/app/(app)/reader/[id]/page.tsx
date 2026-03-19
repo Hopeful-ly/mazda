@@ -1,29 +1,23 @@
 "use client";
 
-import type { NavItem } from "epubjs";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { BookmarkPanel } from "@/components/reader/bookmark-panel";
 import { ComicViewer } from "@/components/reader/comic-viewer";
 import {
-  EpubReader,
-  type EpubReaderHandle,
-} from "@/components/reader/epub-reader";
+  FoliateReader,
+  type FoliateReaderHandle,
+  type ReaderPreferences,
+  type TocNode,
+} from "@/components/reader/foliate-reader";
 import { PdfViewer } from "@/components/reader/pdf-viewer";
 import { ReaderToolbar } from "@/components/reader/reader-toolbar";
+import { SelectionPopover } from "@/components/reader/selection-popover";
 import { TextReader } from "@/components/reader/text-reader";
 import { type TocItem, TocPanel } from "@/components/reader/toc-panel";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebounce } from "@/hooks/useDebounce";
 import { trpc } from "@/lib/trpc";
-
-type ReaderPreferences = {
-  theme: string;
-  fontFamily: string;
-  fontSize: number;
-  lineHeight: number;
-  columns: number;
-};
 
 const DEFAULT_PREFERENCES: ReaderPreferences = {
   theme: "light",
@@ -31,25 +25,29 @@ const DEFAULT_PREFERENCES: ReaderPreferences = {
   fontSize: 16,
   lineHeight: 1.6,
   columns: 1,
+  flowMode: "paginated",
+  maxWidth: 720,
+  margin: 5,
 };
 
-function mapTocItems(items: NavItem[], parentId = "toc"): TocItem[] {
-  return items.map((item, index) => {
-    const id = `${parentId}-${index}`;
-    return {
-      id,
-      label: item.label ?? "Untitled",
-      href: item.href ?? "",
-      subitems: item.subitems ? mapTocItems(item.subitems, id) : [],
-    };
-  });
+function mapFoliateToc(items: TocNode[], parentId = "toc"): TocItem[] {
+  return items.map((item, i) => ({
+    id: `${parentId}-${i}`,
+    label: item.label,
+    href: item.href,
+    subitems: item.subitems
+      ? mapFoliateToc(item.subitems, `${parentId}-${i}`)
+      : [],
+  }));
 }
 
 export default function ReaderPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const readerRef = useRef<EpubReaderHandle>(null);
+  const readerRef = useRef<FoliateReaderHandle>(null);
+  const utils = trpc.useUtils();
 
+  // --- State ---
   const [preferences, setPreferences] =
     useState<ReaderPreferences>(DEFAULT_PREFERENCES);
   const [progress, setProgress] = useState(0);
@@ -57,18 +55,25 @@ export default function ReaderPage() {
   const [toc, setToc] = useState<TocItem[]>([]);
   const [tocOpen, setTocOpen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
+  const [bookmarksOpen, setBookmarksOpen] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  // Selection popover state
+  const [selectionState, setSelectionState] = useState<{
+    cfi: string;
+    text: string;
+    position: { x: number; y: number };
+  } | null>(null);
+
+  // Progress save debounce
   const [savePayload, setSavePayload] = useState<{
     progress: number;
     currentCfi: string;
     currentPage?: number;
   } | null>(null);
-  const [saveError, setSaveError] = useState("");
-  const lastSavedRef = useRef<{
-    progress: number;
-    currentCfi: string;
-    currentPage?: number;
-  } | null>(null);
+  const lastSavedRef = useRef<typeof savePayload>(null);
 
+  // --- tRPC queries ---
   const { data: user } = trpc.auth.me.useQuery();
   const { data: book, isLoading: isBookLoading } = trpc.books.get.useQuery(
     { id },
@@ -76,18 +81,38 @@ export default function ReaderPage() {
   );
   const { data: readerProgress, isLoading: isProgressLoading } =
     trpc.reader.getProgress.useQuery({ bookId: id }, { enabled: !!id });
+  const { data: bookmarks = [] } = trpc.reader.getBookmarks.useQuery(
+    { bookId: id },
+    { enabled: !!id },
+  );
+  const { data: highlights = [] } = trpc.reader.getHighlights.useQuery(
+    { bookId: id },
+    { enabled: !!id },
+  );
 
+  // --- tRPC mutations ---
   const saveProgress = trpc.reader.saveProgress.useMutation({
-    onSuccess() {
-      setSaveError("");
-    },
-    onError(error) {
-      setSaveError(error.message);
-    },
+    onSuccess: () => setSaveError(""),
+    onError: (error) => setSaveError(error.message),
   });
+  const addHighlight = trpc.reader.addHighlight.useMutation({
+    onSuccess: () => utils.reader.getHighlights.invalidate(),
+  });
+  const addBookmark = trpc.reader.addBookmark.useMutation({
+    onSuccess: () => utils.reader.getBookmarks.invalidate(),
+  });
+  const removeBookmark = trpc.reader.removeBookmark.useMutation({
+    onSuccess: () => utils.reader.getBookmarks.invalidate(),
+  });
+  const savePreferences = trpc.reader.updatePreferences.useMutation();
 
-  const addHighlight = trpc.reader.addHighlight.useMutation();
+  // --- Derived state ---
+  const isBookmarked = bookmarks.some((bm) => bm.cfi === currentCfi);
+  const highlightAnnotations = highlights
+    .filter((h) => h.cfiRange)
+    .map((h) => ({ value: h.cfiRange!, color: h.color ?? "yellow" }));
 
+  // --- Load saved preferences ---
   useEffect(() => {
     if (!user?.preferences) return;
     setPreferences({
@@ -96,30 +121,28 @@ export default function ReaderPage() {
       fontSize: user.preferences.readerFontSize,
       lineHeight: user.preferences.readerLineHeight,
       columns: user.preferences.readerColumns,
+      flowMode: (user.preferences as any).readerFlowMode ?? "paginated",
+      maxWidth: (user.preferences as any).readerMaxWidth ?? 720,
+      margin: (user.preferences as any).readerMargin ?? 5,
     });
   }, [user?.preferences]);
 
+  // --- Load saved progress ---
   useEffect(() => {
     if (!readerProgress) return;
     setProgress(readerProgress.progress ?? 0);
     setCurrentCfi(readerProgress.currentCfi ?? "");
   }, [readerProgress]);
 
+  // --- Debounced progress save ---
   const debouncedSavePayload = useDebounce(savePayload, 2000);
 
   useEffect(() => {
     if (!debouncedSavePayload) return;
-
     const last = lastSavedRef.current;
-    const sameCfi =
-      (last?.currentCfi ?? "") === debouncedSavePayload.currentCfi;
-    const samePage =
-      (last?.currentPage ?? null) ===
-      (debouncedSavePayload.currentPage ?? null);
-    const closeProgress =
-      last != null &&
-      Math.abs(last.progress - debouncedSavePayload.progress) < 0.2;
-
+    const sameCfi = (last?.currentCfi ?? "") === debouncedSavePayload.currentCfi;
+    const samePage = (last?.currentPage ?? null) === (debouncedSavePayload.currentPage ?? null);
+    const closeProgress = last != null && Math.abs(last.progress - debouncedSavePayload.progress) < 0.2;
     if (sameCfi && samePage && closeProgress) return;
 
     saveProgress.mutate({
@@ -129,8 +152,34 @@ export default function ReaderPage() {
       currentPage: debouncedSavePayload.currentPage,
     });
     lastSavedRef.current = debouncedSavePayload;
-  }, [debouncedSavePayload, id, saveProgress]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- saveProgress is stable from tRPC
+  }, [debouncedSavePayload, id]);
 
+  // --- Debounced preferences save ---
+  const debouncedPrefs = useDebounce(preferences, 1000);
+
+  const prefsLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (user?.preferences) prefsLoadedRef.current = true;
+  }, [user?.preferences]);
+
+  useEffect(() => {
+    if (!user || !prefsLoadedRef.current) return;
+    savePreferences.mutate({
+      readerTheme: debouncedPrefs.theme,
+      readerFontFamily: debouncedPrefs.fontFamily,
+      readerFontSize: debouncedPrefs.fontSize,
+      readerLineHeight: debouncedPrefs.lineHeight,
+      readerColumns: debouncedPrefs.columns,
+      readerFlowMode: debouncedPrefs.flowMode as "paginated" | "scrolled",
+      readerMaxWidth: debouncedPrefs.maxWidth,
+      readerMargin: debouncedPrefs.margin,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- savePreferences is stable from tRPC
+  }, [debouncedPrefs]);
+
+  // --- Handlers ---
   function handleLocationChange(nextProgress: number, cfi: string) {
     setProgress(nextProgress);
     setCurrentCfi(cfi);
@@ -138,15 +187,41 @@ export default function ReaderPage() {
     setSavePayload({ progress: nextProgress, currentCfi: cfi });
   }
 
-  function handleTextSelected(cfiRange: string, text: string) {
-    const selected = text.trim();
-    if (!selected) return;
+  function handleTextSelected(
+    cfi: string,
+    text: string,
+    position: { x: number; y: number },
+  ) {
+    if (!text.trim()) return;
+    setSelectionState({ cfi, text: text.trim(), position });
+  }
+
+  function handleHighlight(color: string) {
+    if (!selectionState) return;
     addHighlight.mutate({
       bookId: id,
-      text: selected,
-      cfiRange,
-      color: "yellow",
+      text: selectionState.text,
+      cfiRange: selectionState.cfi,
+      color,
     });
+    setSelectionState(null);
+  }
+
+  function handleToggleBookmark() {
+    const existing = bookmarks.find((bm) => bm.cfi === currentCfi);
+    if (existing) {
+      removeBookmark.mutate({ id: existing.id });
+    } else {
+      addBookmark.mutate({
+        bookId: id,
+        cfi: currentCfi || undefined,
+        position: progress,
+      });
+    }
+  }
+
+  function handleProgressScrub(fraction: number) {
+    readerRef.current?.goToFraction(fraction);
   }
 
   function handleTocNavigate(href: string) {
@@ -163,6 +238,7 @@ export default function ReaderPage() {
     });
   }
 
+  // --- Loading / not found states ---
   if (isBookLoading || isProgressLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -179,20 +255,27 @@ export default function ReaderPage() {
     );
   }
 
+  // --- Formats that use the foliate reader ---
+  const useFoliateReader = book.format === "EPUB" || book.format === "MOBI";
+
   return (
     <div className="fixed inset-0 z-20 bg-background">
       <ReaderToolbar
         preferences={preferences}
         onPreferencesChange={setPreferences}
         onToggleToc={() => setTocOpen((prev) => !prev)}
+        onToggleBookmarks={() => setBookmarksOpen((prev) => !prev)}
         bookTitle={book.title}
         progress={progress}
         onBack={() => router.push(`/books/${id}`)}
         visible={controlsVisible}
         onToggleVisibility={() => setControlsVisible((v) => !v)}
+        onProgressScrub={handleProgressScrub}
+        isBookmarked={isBookmarked}
+        onToggleBookmark={handleToggleBookmark}
       />
 
-      {book.format === "EPUB" && (
+      {useFoliateReader && (
         <>
           <TocPanel
             toc={toc}
@@ -201,15 +284,34 @@ export default function ReaderPage() {
             onClose={() => setTocOpen(false)}
           />
 
-          <EpubReader
+          <BookmarkPanel
+            bookmarks={bookmarks}
+            isOpen={bookmarksOpen}
+            onClose={() => setBookmarksOpen(false)}
+            onNavigate={(bm) => {
+              if (bm.cfi) readerRef.current?.goTo(bm.cfi);
+              setBookmarksOpen(false);
+            }}
+            onRemove={(bmId) => removeBookmark.mutate({ id: bmId })}
+          />
+
+          <FoliateReader
             ref={readerRef}
             bookUrl={`/api/books/${id}/content`}
             initialCfi={currentCfi || undefined}
             onLocationChange={handleLocationChange}
             onTextSelected={handleTextSelected}
             preferences={preferences}
-            onTocLoaded={(items) => setToc(mapTocItems(items))}
+            onTocLoaded={(items) => setToc(mapFoliateToc(items))}
             onToggleControls={() => setControlsVisible((v) => !v)}
+            annotations={highlightAnnotations}
+          />
+
+          <SelectionPopover
+            position={selectionState?.position ?? null}
+            selectedText={selectionState?.text ?? ""}
+            onHighlight={handleHighlight}
+            onDismiss={() => setSelectionState(null)}
           />
         </>
       )}
@@ -240,24 +342,6 @@ export default function ReaderPage() {
             setSavePayload({ progress: nextProgress, currentCfi: "" });
           }}
         />
-      )}
-
-      {book.format === "MOBI" && (
-        <div className="flex h-full items-center justify-center">
-          <div className="mx-auto max-w-lg rounded-lg border border-border bg-background p-6">
-            <h1 className="text-lg font-semibold text-foreground">Reader</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              MOBI rendering is not yet available in-browser. Download to read
-              in a compatible app.
-            </p>
-            <Link
-              href={`/books/${id}`}
-              className="mt-4 inline-flex text-sm font-medium text-primary hover:underline"
-            >
-              Back to book
-            </Link>
-          </div>
-        </div>
       )}
 
       {saveError && (

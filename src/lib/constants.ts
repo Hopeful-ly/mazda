@@ -61,4 +61,12 @@ export const READER_FONTS = [
   },
 ] as const;
 
+export const READER_FLOW_MODES = [
+  { value: "paginated", label: "Paginated" },
+  { value: "scrolled", label: "Scroll" },
+] as const;
+
+export const READER_MAX_WIDTH_RANGE = { min: 400, max: 1200, step: 40 } as const;
+export const READER_MARGIN_RANGE = { min: 0, max: 15, step: 1 } as const;
+
 export const PROGRESS_DEBOUNCE_MS = 2000;
