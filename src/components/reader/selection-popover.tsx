@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 const HIGHLIGHT_COLORS = [
   { value: "yellow", bg: "#FDE68A" },
