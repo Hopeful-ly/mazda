@@ -165,7 +165,7 @@ export default function ReaderPage() {
       readerFontSize: debouncedPrefs.fontSize,
       readerLineHeight: debouncedPrefs.lineHeight,
       readerColumns: debouncedPrefs.columns,
-      readerFlowMode: debouncedPrefs.flowMode,
+      readerFlowMode: debouncedPrefs.flowMode as "paginated" | "scrolled",
       readerMaxWidth: debouncedPrefs.maxWidth,
       readerMargin: debouncedPrefs.margin,
     });
