@@ -215,6 +215,9 @@ export const readerRouter = router({
         readerFontSize: z.number().min(10).max(32).optional(),
         readerLineHeight: z.number().min(1).max(3).optional(),
         readerColumns: z.number().min(1).max(2).optional(),
+        readerFlowMode: z.enum(["paginated", "scrolled"]).optional(),
+        readerMaxWidth: z.number().min(400).max(1200).optional(),
+        readerMargin: z.number().min(0).max(15).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

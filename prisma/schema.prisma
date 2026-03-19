@@ -54,6 +54,9 @@ model UserPreferences {
   readerFontSize   Int    @default(16)
   readerLineHeight Float  @default(1.6)
   readerColumns    Int    @default(1)
+  readerFlowMode String @default("paginated") // paginated, scrolled
+  readerMaxWidth Int    @default(720)          // px
+  readerMargin   Int    @default(5)            // percentage
 
   // UI preferences
   libraryView String @default("grid") // grid, list
