@@ -152,13 +152,20 @@ export default function ReaderPage() {
       currentPage: debouncedSavePayload.currentPage,
     });
     lastSavedRef.current = debouncedSavePayload;
-  }, [debouncedSavePayload, id, saveProgress]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- saveProgress is stable from tRPC
+  }, [debouncedSavePayload, id]);
 
   // --- Debounced preferences save ---
   const debouncedPrefs = useDebounce(preferences, 1000);
 
+  const prefsLoadedRef = useRef(false);
+
   useEffect(() => {
-    if (!user) return;
+    if (user?.preferences) prefsLoadedRef.current = true;
+  }, [user?.preferences]);
+
+  useEffect(() => {
+    if (!user || !prefsLoadedRef.current) return;
     savePreferences.mutate({
       readerTheme: debouncedPrefs.theme,
       readerFontFamily: debouncedPrefs.fontFamily,
@@ -169,6 +176,7 @@ export default function ReaderPage() {
       readerMaxWidth: debouncedPrefs.maxWidth,
       readerMargin: debouncedPrefs.margin,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- savePreferences is stable from tRPC
   }, [debouncedPrefs]);
 
   // --- Handlers ---

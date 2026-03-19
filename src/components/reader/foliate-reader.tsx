@@ -254,7 +254,8 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
       const view = viewRef.current;
       if (!view || !ready || !annotations) return;
 
-      // Clear existing and re-add
+      // Clear existing annotations before re-adding
+      view.annotations?.clear?.();
       for (const ann of annotations) {
         view.addAnnotation(ann).catch(() => {});
       }

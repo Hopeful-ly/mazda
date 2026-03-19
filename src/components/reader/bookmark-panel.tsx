@@ -73,7 +73,7 @@ export function BookmarkPanel({
                   onClick={() => onNavigate(bm)}
                   className="flex-1 text-left text-sm truncate"
                 >
-                  {bm.label || `Page ${bm.page ?? "?"}` || "Bookmark"}
+                  {bm.label || (bm.page != null ? `Page ${bm.page}` : "Bookmark")}
                 </button>
                 <span className="text-xs text-neutral-500 shrink-0">
                   {new Date(bm.createdAt).toLocaleDateString()}
