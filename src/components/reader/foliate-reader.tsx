@@ -107,11 +107,13 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
       const container = containerRef.current;
       if (!container) return;
 
-      async function init() {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded above
+      async function init(container: HTMLDivElement) {
         try {
           setLoadError("");
 
           // Dynamic import from public/, bypassing the bundler
+          // @ts-expect-error — runtime import from public/, no TS module
           await import(/* webpackIgnore: true */ "/foliate-js/view.js");
           if (cancelled) return;
 
@@ -225,7 +227,7 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
         }
       }
 
-      init();
+      init(container);
 
       return () => {
         cancelled = true;
@@ -266,6 +268,7 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
       const handleDraw = async (e: CustomEvent) => {
         const { draw, annotation } = e.detail;
         // Dynamic import overlayer for draw functions
+        // @ts-expect-error — runtime import from public/, no TS module
         const { Overlayer } = await import(
           /* webpackIgnore: true */ "/foliate-js/overlayer.js"
         );
