@@ -1,7 +1,7 @@
 "use client";
 
-import { X } from "lucide-react";
-import { useCallback } from "react";
+import { ChevronRight, X } from "lucide-react";
+import { useCallback, useState } from "react";
 
 export interface TocItem {
   id: string;
@@ -26,25 +26,45 @@ function TocEntry({
   depth: number;
   onNavigate: (href: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasChildren = item.subitems && item.subitems.length > 0;
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => onNavigate(item.href)}
-        className="w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors truncate"
-        style={{ paddingLeft: `${1 + depth * 1.25}rem` }}
-        title={item.label.trim()}
-      >
-        {item.label.trim()}
-      </button>
-      {item.subitems?.map((sub) => (
-        <TocEntry
-          key={sub.id}
-          item={sub}
-          depth={depth + 1}
-          onNavigate={onNavigate}
-        />
-      ))}
+      <div className="flex items-center hover:bg-white/10 transition-colors">
+        {hasChildren && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="shrink-0 p-1.5 text-neutral-400 hover:text-neutral-200 transition-colors"
+            style={{ marginLeft: `${0.5 + depth * 1.25}rem` }}
+            aria-label={expanded ? "Collapse" : "Expand"}
+          >
+            <ChevronRight
+              size={14}
+              className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+            />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onNavigate(item.href)}
+          className="flex-1 text-left py-2 pr-4 text-sm truncate"
+          style={{ paddingLeft: hasChildren ? "0.25rem" : `${1 + depth * 1.25}rem` }}
+          title={item.label.trim()}
+        >
+          {item.label.trim()}
+        </button>
+      </div>
+      {hasChildren && expanded &&
+        item.subitems!.map((sub) => (
+          <TocEntry
+            key={sub.id}
+            item={sub}
+            depth={depth + 1}
+            onNavigate={onNavigate}
+          />
+        ))}
     </>
   );
 }
