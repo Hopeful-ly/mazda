@@ -31,6 +31,8 @@ export interface FoliateReaderHandle {
 
 interface FoliateReaderProps {
   bookUrl: string;
+  /** Filename hint for foliate-js format detection (e.g. "book.epub") */
+  filename?: string;
   initialCfi?: string;
   onLocationChange: (progress: number, cfi: string) => void;
   preferences: ReaderPreferences;
@@ -54,6 +56,7 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
   function FoliateReader(
     {
       bookUrl,
+      filename,
       initialCfi,
       onLocationChange,
       preferences,
@@ -123,6 +126,9 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
           const blob = await response.blob();
           if (cancelled) return;
 
+          // foliate-js expects a File (with .name) to detect format via extension
+          const file = new File([blob], filename ?? "book.epub", { type: blob.type });
+
           // Create the custom element
           const view = document.createElement("foliate-view") as any;
           view.style.cssText = "width:100%;height:100%;";
@@ -130,7 +136,7 @@ export const FoliateReader = forwardRef<FoliateReaderHandle, FoliateReaderProps>
           viewRef.current = view;
 
           // Open the book
-          await view.open(blob);
+          await view.open(file);
           if (cancelled) return;
 
           // Apply initial preferences to renderer

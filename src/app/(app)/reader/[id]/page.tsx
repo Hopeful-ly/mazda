@@ -298,6 +298,7 @@ export default function ReaderPage() {
           <FoliateReader
             ref={readerRef}
             bookUrl={`/api/books/${id}/content`}
+            filename={`book.${book.format?.toLowerCase() ?? "epub"}`}
             initialCfi={currentCfi || undefined}
             onLocationChange={handleLocationChange}
             onTextSelected={handleTextSelected}
