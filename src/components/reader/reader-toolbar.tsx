@@ -103,10 +103,10 @@ export function ReaderToolbar({
 
       {/* Bottom sheet — progress bar + settings */}
       <div
-        className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-300 ease-in-out
+        className={`fixed bottom-0 left-0 right-0 z-50 max-h-[85vh] flex flex-col transition-transform duration-300 ease-in-out
           ${visible ? "translate-y-0" : "translate-y-full"}`}
       >
-        <div className="bg-neutral-900/95 backdrop-blur text-neutral-100 shadow-lg safe-area-bottom">
+        <div className="flex flex-col min-h-0 bg-neutral-900/95 backdrop-blur text-neutral-100 shadow-lg safe-area-bottom">
           {/* Progress slider */}
           <div className="px-4 pt-3 pb-2">
             <div className="flex items-center gap-3">
@@ -141,8 +141,8 @@ export function ReaderToolbar({
 
           {/* Settings panel */}
           <div
-            className={`overflow-hidden transition-all duration-300 ease-in-out border-t border-white/10
-              ${settingsOpen ? "max-h-[60vh] overflow-y-auto" : "max-h-0 border-t-transparent"}`}
+            className={`min-h-0 transition-all duration-300 ease-in-out border-t border-white/10
+              ${settingsOpen ? "flex-1 overflow-y-auto" : "max-h-0 overflow-hidden border-t-transparent"}`}
           >
             <div className="px-4 py-4 space-y-5">
               {/* Theme selector */}
