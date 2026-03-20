@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { validateSession } from "@/lib/auth";
 import { prisma } from "@/server/db/prisma";
+import { normalizeCoverBuffer } from "@/server/services/cover";
 import { readCoverFile, saveCover } from "@/server/services/storage";
 
 const MAX_COVER_SIZE = 10 * 1024 * 1024; // 10MB
@@ -51,24 +52,9 @@ export async function GET(
   try {
     const buffer = await readCoverFile(book.coverPath);
 
-    // Detect actual image type from magic bytes
-    let contentType = "image/jpeg";
-    if (buffer[0] === 0x89 && buffer[1] === 0x50) {
-      contentType = "image/png";
-    } else if (buffer[0] === 0x47 && buffer[1] === 0x49) {
-      contentType = "image/gif";
-    } else if (
-      buffer[0] === 0x52 &&
-      buffer[1] === 0x49 &&
-      buffer[8] === 0x57 &&
-      buffer[9] === 0x45
-    ) {
-      contentType = "image/webp";
-    }
-
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": detectImageContentType(buffer),
         "Cache-Control": "public, max-age=604800",
       },
     });
@@ -136,8 +122,19 @@ export async function POST(
       );
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const coverPath = await saveCover(buffer, id);
+    const rawBuffer = Buffer.from(await file.arrayBuffer());
+    const normalizedCover = await normalizeCoverBuffer(rawBuffer);
+    if (!normalizedCover) {
+      return NextResponse.json(
+        {
+          error:
+            "Could not process cover image. Please upload a clearer cover image.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const coverPath = await saveCover(normalizedCover, id);
 
     await prisma.book.update({
       where: { id },
@@ -152,4 +149,38 @@ export async function POST(
       { status: 500 },
     );
   }
+}
+
+function detectImageContentType(buffer: Buffer): string {
+  if (buffer.length >= 12) {
+    if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+      return "image/jpeg";
+    }
+
+    if (
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47
+    ) {
+      return "image/png";
+    }
+
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+      return "image/gif";
+    }
+
+    if (
+      buffer[0] === 0x52 &&
+      buffer[1] === 0x49 &&
+      buffer[8] === 0x57 &&
+      buffer[9] === 0x45 &&
+      buffer[10] === 0x42 &&
+      buffer[11] === 0x50
+    ) {
+      return "image/webp";
+    }
+  }
+
+  return "image/jpeg";
 }

@@ -3,7 +3,7 @@
 import { Heart } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { trpc } from "@/lib/trpc";
@@ -41,6 +41,11 @@ const statusLabels: Record<
 
 export function BookCard({ book }: BookCardProps) {
   const utils = trpc.useUtils();
+  const [coverFailed, setCoverFailed] = useState(false);
+  const coverInitial = useMemo(() => {
+    const value = (book.title || "?").trim();
+    return value ? (value[0]?.toUpperCase() ?? "?") : "?";
+  }, [book.title]);
 
   const favoriteMutation = trpc.books.updateUserBook.useMutation({
     onSuccess: () => {
@@ -74,14 +79,23 @@ export function BookCard({ book }: BookCardProps) {
     >
       {/* Cover */}
       <div className="relative aspect-[2/3] w-full overflow-hidden bg-muted">
-        <Image
-          src={`/api/books/${book.id}/cover`}
-          alt={book.title}
-          fill
-          unoptimized
-          className="object-cover transition-transform duration-200 group-hover:scale-105"
-          sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 16vw"
-        />
+        {!coverFailed ? (
+          <Image
+            src={`/api/books/${book.id}/cover`}
+            alt={book.title}
+            fill
+            unoptimized
+            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 16vw"
+            onError={() => setCoverFailed(true)}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-muted via-muted to-muted/80">
+            <span className="text-3xl font-semibold text-muted-foreground/70">
+              {coverInitial}
+            </span>
+          </div>
+        )}
 
         {/* Favorite button */}
         <button

@@ -2,6 +2,7 @@
 
 import { Menu, Search, Upload } from "lucide-react";
 import { useRef, useState } from "react";
+import { useToast } from "@/components/ui/toast";
 import { trpc } from "@/lib/trpc";
 
 interface HeaderProps {
@@ -12,6 +13,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const utils = trpc.useUtils();
+  const { toast } = useToast();
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -34,8 +36,11 @@ export function Header({ onToggleSidebar }: HeaderProps) {
 
       // Invalidate book queries so lists refresh
       await utils.books.invalidate();
+      toast(`Uploaded "${file.name}"`, "success");
     } catch (err) {
       console.error("Upload error:", err);
+      const message = err instanceof Error ? err.message : "Upload failed";
+      toast(message, "error");
     } finally {
       setUploading(false);
       // Reset file input so the same file can be re-selected

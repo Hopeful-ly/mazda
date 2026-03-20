@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
 import { READING_STATUSES } from "@/lib/constants";
 import { trpc } from "@/lib/trpc";
 import { formatDate, formatFileSize } from "@/lib/utils";
@@ -34,6 +35,7 @@ export default function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const utils = trpc.useUtils();
+  const { toast } = useToast();
 
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
@@ -45,6 +47,7 @@ export default function BookDetailPage() {
   });
   const [coverKey, setCoverKey] = useState(0);
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [coverFailed, setCoverFailed] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
   const { data: book, isLoading } = trpc.books.get.useQuery(
@@ -182,12 +185,14 @@ export default function BookDetailPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error ?? "Failed to upload cover");
+        toast(data.error ?? "Failed to upload cover", "error");
         return;
       }
+      setCoverFailed(false);
       setCoverKey((k) => k + 1);
+      toast("Cover updated", "success");
     } catch {
-      alert("Failed to upload cover");
+      toast("Failed to upload cover", "error");
     } finally {
       setUploadingCover(false);
       if (coverInputRef.current) coverInputRef.current.value = "";
@@ -217,16 +222,15 @@ export default function BookDetailPage() {
               fill
               unoptimized
               className="object-cover"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.style.display = "none";
-                target.parentElement?.classList.add(
-                  "flex",
-                  "items-center",
-                  "justify-center",
-                );
-              }}
+              onError={() => setCoverFailed(true)}
             />
+            {coverFailed && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-muted to-muted/70">
+                <span className="text-4xl font-semibold text-muted-foreground/70">
+                  {(book.title?.trim()?.[0] ?? "?").toUpperCase()}
+                </span>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => coverInputRef.current?.click()}
