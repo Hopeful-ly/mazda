@@ -215,6 +215,7 @@ export default function BookDetailPage() {
               src={`/api/books/${id}/cover?v=${coverKey}`}
               alt={`Cover of ${book.title}`}
               fill
+              unoptimized
               className="object-cover"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;

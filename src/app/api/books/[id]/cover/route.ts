@@ -44,17 +44,8 @@ export async function GET(
   }
 
   if (!book?.coverPath) {
-    // Return a placeholder SVG
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300" viewBox="0 0 200 300">
-      <rect width="200" height="300" fill="#E5E7EB"/>
-      <text x="100" y="150" text-anchor="middle" fill="#9CA3AF" font-family="sans-serif" font-size="14">No Cover</text>
-    </svg>`;
-    return new NextResponse(svg, {
-      headers: {
-        "Content-Type": "image/svg+xml",
-        "Cache-Control": "public, max-age=86400",
-      },
-    });
+    // Return 404 so the client can show its own placeholder
+    return NextResponse.json({ error: "No cover" }, { status: 404 });
   }
 
   try {

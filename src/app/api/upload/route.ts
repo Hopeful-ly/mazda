@@ -69,14 +69,24 @@ export async function POST(req: Request) {
     let extractedCoverBuffer: Buffer | undefined;
 
     if (format === "EPUB") {
-      const epubMeta = await extractEpubMetadata(buffer);
-      if (epubMeta.title) title = epubMeta.title;
-      if (epubMeta.author) author = epubMeta.author;
-      if (epubMeta.description) description = epubMeta.description;
-      if (epubMeta.isbn) isbn = epubMeta.isbn;
-      if (epubMeta.publisher) publisher = epubMeta.publisher;
-      if (epubMeta.language) language = epubMeta.language;
-      if (epubMeta.coverImage) extractedCoverBuffer = epubMeta.coverImage;
+      try {
+        const epubMeta = await extractEpubMetadata(buffer);
+        if (epubMeta.title) title = epubMeta.title;
+        if (epubMeta.author) author = epubMeta.author;
+        if (epubMeta.description) description = epubMeta.description;
+        if (epubMeta.isbn) isbn = epubMeta.isbn;
+        if (epubMeta.publisher) publisher = epubMeta.publisher;
+        if (epubMeta.language) language = epubMeta.language;
+        if (epubMeta.coverImage) {
+          extractedCoverBuffer = epubMeta.coverImage;
+          console.log(`[upload] Extracted cover from EPUB: ${extractedCoverBuffer.length} bytes`);
+        } else {
+          console.log(`[upload] No cover image found in EPUB`);
+        }
+        console.log(`[upload] EPUB metadata: title="${title}", author="${author}", isbn=${isbn ?? "none"}`);
+      } catch (err) {
+        console.error(`[upload] EPUB metadata extraction failed:`, err);
+      }
     }
 
     // Prefer registry metadata/cover first, then fall back to extracted cover
@@ -131,11 +141,18 @@ export async function POST(req: Request) {
     // Save cover (registry first, extraction fallback)
     const selectedCoverBuffer = registryCoverBuffer ?? extractedCoverBuffer;
     if (selectedCoverBuffer) {
-      const coverPath = await saveCover(selectedCoverBuffer, book.id);
-      await prisma.book.update({
-        where: { id: book.id },
-        data: { coverPath },
-      });
+      try {
+        const coverPath = await saveCover(selectedCoverBuffer, book.id);
+        await prisma.book.update({
+          where: { id: book.id },
+          data: { coverPath },
+        });
+        console.log(`[upload] Saved cover: ${coverPath} (${selectedCoverBuffer.length} bytes, source: ${registryCoverBuffer ? "registry" : "epub"})`);
+      } catch (err) {
+        console.error(`[upload] Failed to save cover:`, err);
+      }
+    } else {
+      console.log(`[upload] No cover available from registry or extraction`);
     }
 
     // Create UserBook relationship
@@ -164,7 +181,9 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({ book });
+    // Re-fetch to include any cover update
+    const finalBook = await prisma.book.findUnique({ where: { id: book.id } });
+    return NextResponse.json({ book: finalBook ?? book });
   } catch (error) {
     console.error("Upload error:", error);
     return NextResponse.json(
