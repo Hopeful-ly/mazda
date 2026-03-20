@@ -80,6 +80,7 @@ export async function POST(req: Request) {
     }
 
     // Prefer registry metadata/cover first, then fall back to extracted cover
+    console.log(`[upload] Looking up metadata: isbn=${isbn ?? "none"}, title="${title}", author="${author}"`);
     let metadata = isbn ? await fetchMetadataByISBN(isbn) : null;
     if (!metadata) {
       metadata = await fetchMetadataByTitle(
@@ -88,16 +89,24 @@ export async function POST(req: Request) {
       );
     }
 
-    if (metadata?.description) description = metadata.description;
-    if (metadata?.publisher) publisher = metadata.publisher;
-    if (metadata?.language) language = metadata.language;
-    if (metadata?.isbn && !isbn) isbn = metadata.isbn;
+    if (metadata) {
+      console.log(`[upload] Found metadata: coverUrl=${metadata.coverUrl ?? "none"}`);
+      if (metadata.description) description = metadata.description;
+      if (metadata.publisher) publisher = metadata.publisher;
+      if (metadata.language) language = metadata.language;
+      if (metadata.isbn && !isbn) isbn = metadata.isbn;
+    } else {
+      console.log(`[upload] No metadata found from Open Library`);
+    }
 
     let registryCoverBuffer: Buffer | undefined;
     if (metadata?.coverUrl) {
       const downloaded = await downloadCover(metadata.coverUrl);
       if (downloaded) {
+        console.log(`[upload] Downloaded registry cover: ${downloaded.length} bytes`);
         registryCoverBuffer = downloaded;
+      } else {
+        console.log(`[upload] Registry cover download failed or too small`);
       }
     }
 

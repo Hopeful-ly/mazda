@@ -16,14 +16,23 @@ export async function fetchMetadataByISBN(
   isbn: string,
 ): Promise<BookMetadata | null> {
   try {
+    // Strip hyphens for API lookup
+    const cleanIsbn = isbn.replace(/-/g, "");
     const res = await fetch(
-      `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`,
+      `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`,
+      { signal: AbortSignal.timeout(8000) },
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[metadata] Open Library ISBN lookup failed: ${res.status}`);
+      return null;
+    }
 
     const data = await res.json();
-    const book = data[`ISBN:${isbn}`];
-    if (!book) return null;
+    const book = data[`ISBN:${cleanIsbn}`];
+    if (!book) {
+      console.log(`[metadata] No Open Library result for ISBN ${cleanIsbn}`);
+      return null;
+    }
 
     return {
       title: book.title,
@@ -32,14 +41,15 @@ export async function fetchMetadataByISBN(
         typeof book.notes === "string"
           ? book.notes
           : (book.notes?.value ?? undefined),
-      isbn,
+      isbn: cleanIsbn,
       publisher: book.publishers?.[0]?.name,
       publishedDate: book.publish_date,
       coverUrl: book.cover?.large ?? book.cover?.medium,
       pageCount: book.number_of_pages,
       language: undefined,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[metadata] ISBN lookup error:`, err);
     return null;
   }
 }
@@ -55,13 +65,22 @@ export async function fetchMetadataByTitle(
     }
 
     const res = await fetch(
-      `https://openlibrary.org/search.json?${query}&limit=1`,
+      `https://openlibrary.org/search.json?${query}&limit=3`,
+      { signal: AbortSignal.timeout(8000) },
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[metadata] Open Library title search failed: ${res.status}`);
+      return null;
+    }
 
     const data = await res.json();
-    const doc = data.docs?.[0];
-    if (!doc) return null;
+    // Pick the first result that has a cover, or fall back to first result
+    const docs = data.docs ?? [];
+    const doc = docs.find((d: any) => d.cover_i) ?? docs[0];
+    if (!doc) {
+      console.log(`[metadata] No Open Library result for "${title}"`);
+      return null;
+    }
 
     const isbn = doc.isbn?.[0];
     const coverId = doc.cover_i;
@@ -79,7 +98,8 @@ export async function fetchMetadataByTitle(
       pageCount: doc.number_of_pages_median,
       language: doc.language?.[0],
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[metadata] Title search error:`, err);
     return null;
   }
 }
@@ -88,7 +108,14 @@ export async function downloadCover(url: string): Promise<Buffer | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
+
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.startsWith("image/")) return null;
+
     const arrayBuffer = await res.arrayBuffer();
+    // Reject tiny placeholders (< 1KB is not a real cover)
+    if (arrayBuffer.byteLength < 1000) return null;
+
     return Buffer.from(arrayBuffer);
   } catch {
     return null;

@@ -18,7 +18,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +43,9 @@ export default function BookDetailPage() {
     author: "",
     description: "",
   });
+  const [coverKey, setCoverKey] = useState(0);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
   const { data: book, isLoading } = trpc.books.get.useQuery(
     { id },
@@ -165,6 +168,32 @@ export default function BookDetailPage() {
     addToCollection.mutate({ collectionId, bookId: id });
   }
 
+  async function handleCoverUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingCover(true);
+    try {
+      const formData = new FormData();
+      formData.append("cover", file);
+      const res = await fetch(`/api/books/${id}/cover`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error ?? "Failed to upload cover");
+        return;
+      }
+      setCoverKey((k) => k + 1);
+    } catch {
+      alert("Failed to upload cover");
+    } finally {
+      setUploadingCover(false);
+      if (coverInputRef.current) coverInputRef.current.value = "";
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Back button */}
@@ -180,9 +209,10 @@ export default function BookDetailPage() {
       <div className="flex flex-col gap-8 lg:flex-row">
         {/* Left column: Cover */}
         <div className="flex-shrink-0">
-          <div className="relative aspect-[2/3] w-64 overflow-hidden rounded-lg border border-border bg-muted">
+          <div className="relative aspect-[2/3] w-64 overflow-hidden rounded-lg border border-border bg-muted group">
             <Image
-              src={`/api/books/${id}/cover`}
+              key={coverKey}
+              src={`/api/books/${id}/cover?v=${coverKey}`}
               alt={`Cover of ${book.title}`}
               fill
               className="object-cover"
@@ -195,6 +225,23 @@ export default function BookDetailPage() {
                   "justify-center",
                 );
               }}
+            />
+            <button
+              type="button"
+              onClick={() => coverInputRef.current?.click()}
+              disabled={uploadingCover}
+              className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 group-hover:bg-black/50 group-hover:opacity-100 transition-all cursor-pointer"
+            >
+              <span className="text-white text-sm font-medium">
+                {uploadingCover ? "Uploading..." : "Change Cover"}
+              </span>
+            </button>
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="hidden"
+              onChange={handleCoverUpload}
             />
           </div>
         </div>
