@@ -299,7 +299,7 @@ export default function ReaderPage() {
             ref={readerRef}
             bookUrl={`/api/books/${id}/content`}
             filename={`book.${book.format?.toLowerCase() ?? "epub"}`}
-            initialCfi={currentCfi || undefined}
+            initialCfi={readerProgress?.currentCfi || undefined}
             onLocationChange={handleLocationChange}
             onTextSelected={handleTextSelected}
             preferences={preferences}
